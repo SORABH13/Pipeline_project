@@ -1,0 +1,5 @@
+{  "commonConfig": {
+      "serviceName": "iris-pipeline",
+      "platform": "aws"
+    }
+} 
