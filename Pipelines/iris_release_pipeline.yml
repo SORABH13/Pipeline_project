@@ -48,7 +48,7 @@ Resources:
   Pipeline:
     Type: 'AWS::CodePipeline::Pipeline'
     Properties:
-      Name: 'Iris-project-Pipeline'
+      Name: 'Iris-project-Pipeline-release'
       RoleArn: !Sub "arn:aws:iam::${AWS::AccountId}:role/iris"
       ArtifactStore:
         Location: !Ref PipelineBucket
