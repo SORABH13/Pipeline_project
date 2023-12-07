@@ -1,0 +1,287 @@
+AWSTemplateFormatVersion: '2010-09-09'
+
+Parameters:
+  GitHubOwner:
+    Type: String
+    Description: 'GitHub owner details'
+    Default: "SORABH13"
+  GitHubRepo:
+    Type: String
+    Description: 'GitHub repo name'
+    Default: "Pipeline_project"
+  GitHubBranch:
+    Type: String
+    Default: 'main'
+    Description: 'main'
+  GitHubOAuthToken:
+    Type: String
+    NoEcho: true
+    Description: 'GitHub token value'
+    Default: "/GithubToken"
+  PipelineBucket:
+    Type: 'AWS::SSM::Parameter::Value<String>'
+    Description: Name of the bucket to use for the CodePipeline artifacts
+    Default: "/CloudformationBucket"
+  DevelopAccountRoleArn:
+    Type: String
+    Description: 'IAM role ARN for the Develop account'
+    Default: "arn:aws:iam::${AWS::AccountId}:role/iris"
+  UATAccountRoleArn:
+    Type: String
+    Description: 'IAM role ARN for the UAT account'
+    Default: "arn:aws:iam::${AWS::AccountId}:role/iris"
+  StagingAccountRoleArn:
+    Type: String
+    Description: 'IAM role ARN for the Staging account'
+    Default: "arn:aws:iam::${AWS::AccountId}:role/iris"
+  ProdAccountRoleArn:
+    Type: String
+    Description: 'IAM role ARN for the Prod account'
+    Default: "arn:aws:iam::${AWS::AccountId}:role/iris"
+  SnsTopiceArn:
+    Type: String
+    Description: 'Alaram SNS Topic ARN'
+    Default: 'arn:aws:sns:eu-west-1:${AWS::AccountId}:iris_notification'
+
+Resources:
+  # CodePipeline
+  Pipeline:
+    Type: 'AWS::CodePipeline::Pipeline'
+    Properties:
+      Name: 'Iris-project-Pipeline'
+      RoleArn: !Sub "arn:aws:iam::${AWS::AccountId}:role/iris"
+      ArtifactStore:
+        Location: !Ref PipelineBucket
+        Type: 'S3'
+      Stages:
+        - Name: 'Source'
+          Actions:
+            - Name: 'SourceAction'
+              ActionTypeId:
+                Category: 'Source'
+                Owner: 'ThirdParty'
+                Version: '1'
+                Provider: 'GitHub'
+              Configuration:
+                Owner: !Ref 'GitHubOwner'
+                Repo: !Ref 'GitHubRepo'
+                Branch: !Ref 'GitHubBranch'
+                OAuthToken: !Ref 'GitHubOAuthToken'
+              OutputArtifacts:
+                - Name: 'IrisSourceOutput'
+
+        - Name: 'Build'
+          Actions:
+            - Name: 'BuildAction'
+              ActionTypeId:
+                Category: 'Build'
+                Owner: 'AWS'
+                Version: '1'
+                Provider: 'CodeBuild'
+              Configuration:
+                ProjectName: 'IrisClassifierCodeBuild'
+              InputArtifacts:
+                - Name: 'IrisSourceOutput'
+              OutputArtifacts:
+                - Name: 'IrisBuildOutput'
+
+        - Name: 'Deploy-to-Develop'
+          Actions:
+            - Name: 'DeployActionDevelop'
+              ActionTypeId:
+                Category: 'Deploy'
+                Owner: 'AWS'
+                Version: '1'
+                Provider: 'ECS'
+              Configuration:
+                ClusterName: 'iriscluster'
+                ServiceName: 'IrisEcsService'
+                FileName: 'ecs-task-definition.json'
+              InputArtifacts:
+                - Name: 'IrisBuildOutput'
+
+        - Name: 'Approval-for-UAT'
+          Actions:
+            - Name: SignoffUAT
+              ActionTypeId:
+                Category: Approval
+                Owner: AWS
+                Version: 1
+                Provider: Manual
+              Configuration:
+                CustomData: Promote to UAT?
+              RunOrder: 1 
+
+        - Name: 'Deploy-to-UAT'
+          Actions:
+            - Name: 'DeployActionUAT'
+              ActionTypeId:
+                Category: 'Deploy'
+                Owner: 'AWS'
+                Version: '1'
+                Provider: 'ECS'
+              Configuration:
+                ClusterName: 'iriscluster'
+                ServiceName: 'IrisEcsService'
+                FileName: 'ecs-task-definition.json'
+              InputArtifacts:
+                - Name: 'IrisBuildOutput'
+
+        - Name: 'Approval-for-Staging'
+          Actions:
+            - Name: SignoffStaging
+              ActionTypeId:
+                Category: Approval
+                Owner: AWS
+                Version: 1
+                Provider: Manual
+              Configuration:
+                CustomData: Promote to Staging?
+              RunOrder: 2 
+
+        - Name: 'Deploy-to-Staging'
+          Actions:
+            - Name: 'DeployActionStaging'
+              ActionTypeId:
+                Category: 'Deploy'
+                Owner: 'AWS'
+                Version: '1'
+                Provider: 'ECS'
+              Configuration:
+                ClusterName: 'iriscluster'
+                ServiceName: 'IrisEcsService'
+                FileName: 'ecs-task-definition.json'
+              InputArtifacts:
+                - Name: 'IrisBuildOutput'
+
+        - Name: 'Approval-for-Prod'
+          Actions:
+            - Name: SignoffProd
+              ActionTypeId:
+                Category: Approval
+                Owner: AWS
+                Version: 1
+                Provider: Manual
+              Configuration:
+                CustomData: Promote to Prod?
+              RunOrder: 3 
+
+        - Name: 'Deploy-to-Prod'
+          Actions:
+            - Name: 'DeployActionProd'
+              ActionTypeId:
+                Category: 'Deploy'
+                Owner: 'AWS'
+                Version: '1'
+                Provider: 'ECS'
+              Configuration:
+                ClusterName: 'iriscluster'
+                ServiceName: 'IrisEcsService'
+                FileName: 'ecs-task-definition.json'
+              InputArtifacts:
+                - Name: 'IrisBuildOutput'
+
+  # Lambda function for API Service
+  IrisLambdaFunction:
+    Type: 'AWS::Lambda::Function'
+    Properties:
+      FunctionName: 'IrisLambdaFunction'
+      Handler: 'index.handler'
+      Role: !GetAtt LambdaExecutionRole.Arn
+      Code:
+        S3Bucket: !Ref PipelineBucket
+        S3Key: 'index.js.zip'
+      Runtime: 'nodejs14.x'
+      Timeout: 30
+
+  # IAM Role for Lambda Execution
+  LambdaExecutionRole:
+    Type: 'AWS::IAM::Role'
+    Properties:
+      RoleName: 'LambdaExecutionRole'
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: 'Allow'
+            Principal:
+              Service: 'lambda.amazonaws.com'
+            Action: 'sts:AssumeRole'
+      Policies:
+        - PolicyName: 'LambdaExecutionPolicy'
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: 'Allow'
+                Action:
+                  - 'logs:CreateLogGroup'
+                  - 'logs:CreateLogStream'
+                  - 'logs:PutLogEvents'
+                Resource: '*'
+
+  # API Gateway
+  IrisApiGateway:
+    Type: 'AWS::ApiGateway::RestApi'
+    Properties:
+      Name: 'IrisApiGateway'
+
+  IrisApiResource:
+    Type: 'AWS::ApiGateway::Resource'
+    Properties:
+      RestApiId: !Ref IrisApiGateway
+      ParentId: !GetAtt 'IrisApiGateway.RootResourceId'
+      PathPart: 'iris'
+
+  IrisApiMethod:
+    Type: 'AWS::ApiGateway::Method'
+    Properties:
+      AuthorizationType: 'NONE'
+      HttpMethod: 'POST'
+      ResourceId: !Ref IrisApiResource
+      RestApiId: !Ref IrisApiGateway
+      Integration:
+        IntegrationHttpMethod: 'POST'
+        Type: 'AWS_PROXY'
+        Uri: !Sub 'arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${IrisLambdaFunction.Arn}/invocations'
+
+  IrisApiDeployment:
+    Type: 'AWS::ApiGateway::Deployment'
+    DependsOn: IrisApiMethod
+    Properties:
+      RestApiId: !Ref IrisApiGateway
+      
+
+  IrisApiStage:
+    Type: 'AWS::ApiGateway::Stage'
+    Properties:
+      DeploymentId: !Ref IrisApiDeployment
+      RestApiId: !Ref IrisApiGateway
+      StageName: 'prod'
+
+  # CloudWatch Log Group for API Service Logging
+  IrisLogGroup:
+    Type: 'AWS::Logs::LogGroup'
+    Properties:
+      LogGroupName: '/iris-api-logs'
+
+  # CloudWatch Alarm for Monitoring
+  IrisApiErrorAlarm:
+    Type: 'AWS::CloudWatch::Alarm'
+    Properties:
+      AlarmName: 'IrisApiErrorAlarm'
+      MetricName: 'HTTPCode_ELB_5XX_Count'
+      Namespace: 'AWS/ApplicationELB'
+      Dimensions:
+        - Name: 'LoadBalancer'
+          Value: !Ref 'IrisApiGateway'
+      Statistic: 'Sum'
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: 'GreaterThanOrEqualToThreshold'
+      AlarmActions:
+        - !Ref SnsTopiceArn
+
+Outputs:
+  IrisApiUrl:
+    Description: 'URL of the deployed Iris Classifier API'
+    Value: !Sub 'http://IrisEcsService-<RandomString>.elb.amazonaws.com'
