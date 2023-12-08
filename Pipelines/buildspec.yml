@@ -1,0 +1,31 @@
+version: 0.2
+
+phases:
+  pre_build:
+    commands:
+      - echo Logging in to Amazon ECR...
+      - aws --version
+      - $(aws ecr get-login --no-include-email --region $AWS_DEFAULT_REGION)
+
+  build:
+    commands:
+      - echo Build started on `date`
+      - echo Building the Docker image...
+      - docker build -t $REPOSITORY_URI:$CODEBUILD_RESOLVED_SOURCE_VERSION .
+      - docker tag $REPOSITORY_URI:$CODEBUILD_RESOLVED_SOURCE_VERSION $REPOSITORY_URI:latest
+
+  post_build:
+    commands:
+      - echo Build completed on `date`
+      - echo Pushing the Docker images to Amazon ECR...
+      - docker push $REPOSITORY_URI:$CODEBUILD_RESOLVED_SOURCE_VERSION
+      - docker push $REPOSITORY_URI:latest
+      - echo Writing image definitions file...
+      # Replace the placeholder in ecs-task-definition.json with the actual ECR repository URI
+      - sed -i "s|REPOSITORY_URI_PLACEHOLDER|${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO_NAME}:${CODEBUILD_RESOLVED_SOURCE_VERSION}|g" ecs-task-definition.json
+      # Create imagedefinitions.json file with the updated image URI
+      - echo '[{"name":"iris-container","image":"'${AWS_ACCOUNT_ID}'.dkr.ecr.'${AWS_REGION}'.amazonaws.com/'${ECR_REPO_NAME}':'${CODEBUILD_RESOLVED_SOURCE_VERSION}'","cpu":256,"memory":512,"essential":true,"portMappings":[{"containerPort":80,"hostPort":80}],"logConfiguration":{"logDriver":"awslogs","options":{"awslogs-group":"/ecs/iris-logs","awslogs-region":"your-region","awslogs-stream-prefix":"iris-container"}},"networkMode":"awsvpc","requiresCompatibilities":["FARGATE"]}]' > imagedefinitions.json
+
+      #- printf '[{"name":"iris-container","imageUri":"%s"}]' $REPOSITORY_URI:$CODEBUILD_RESOLVED_SOURCE_VERSION > imagedefinitions.json
+artifacts:
+  files: imagedefinitions.json

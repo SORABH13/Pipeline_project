@@ -3,7 +3,7 @@
   "containerDefinitions": [
     {
       "name": "iris-container",
-      "image": "your-docker-image:latest",
+      "image": "141454182275.dkr.ecr.eu-west-1.amazonaws.com/iris_project",
       "cpu": 256,
       "memory": 512,
       "essential": true,
@@ -17,7 +17,7 @@
         "logDriver": "awslogs",
         "options": {
           "awslogs-group": "/ecs/iris-logs",
-          "awslogs-region": "your-region",
+          "awslogs-region": "eu-west-1",
           "awslogs-stream-prefix": "iris-container"
         }
       }

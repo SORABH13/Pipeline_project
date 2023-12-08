@@ -44,6 +44,26 @@ Parameters:
     Default: 'arn:aws:sns:eu-west-1:${AWS::AccountId}:iris_notification'
 
 Resources:
+
+  IrisCodeBuildProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: 'IrisProject'
+      Description: Build artifact from source
+      ServiceRole: !Sub "arn:aws:iam::${AWS::AccountId}:role/CodeBuildRole"
+      Artifacts:
+        Type: CODEPIPELINE
+      Environment:
+        Type: LINUX_CONTAINER
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/amazonlinux2-x86_64-standard:5.0
+        PrivilegedMode: True
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: Pipeline/buildspec.yml
+      TimeoutInMinutes: 45
+
+
   # CodePipeline
   Pipeline:
     Type: 'AWS::CodePipeline::Pipeline'
@@ -79,7 +99,7 @@ Resources:
                 Version: '1'
                 Provider: 'CodeBuild'
               Configuration:
-                ProjectName: 'IrisClassifierCodeBuild'
+                ProjectName: !Ref IrisCodeBuildProject
               InputArtifacts:
                 - Name: 'IrisSourceOutput'
               OutputArtifacts:
@@ -96,7 +116,7 @@ Resources:
               Configuration:
                 ClusterName: 'iriscluster'
                 ServiceName: 'IrisEcsService'
-                FileName: 'ecs-task-definition.json'
+                FileName: 'Pipeline/ecs-task-definition.json'
               InputArtifacts:
                 - Name: 'IrisBuildOutput'
 
@@ -123,7 +143,7 @@ Resources:
               Configuration:
                 ClusterName: 'iriscluster'
                 ServiceName: 'IrisEcsService'
-                FileName: 'ecs-task-definition.json'
+                FileName: 'Pipeline/ecs-task-definition.json'
               InputArtifacts:
                 - Name: 'IrisBuildOutput'
 
@@ -150,7 +170,7 @@ Resources:
               Configuration:
                 ClusterName: 'iriscluster'
                 ServiceName: 'IrisEcsService'
-                FileName: 'ecs-task-definition.json'
+                FileName: 'Pipeline/ecs-task-definition.json'
               InputArtifacts:
                 - Name: 'IrisBuildOutput'
 
@@ -177,7 +197,7 @@ Resources:
               Configuration:
                 ClusterName: 'iriscluster'
                 ServiceName: 'IrisEcsService'
-                FileName: 'ecs-task-definition.json'
+                FileName: 'Pipeline/ecs-task-definition.json'
               InputArtifacts:
                 - Name: 'IrisBuildOutput'
 
@@ -187,36 +207,12 @@ Resources:
     Properties:
       FunctionName: 'IrisLambdaFunction'
       Handler: 'index.handler'
-      Role: !GetAtt LambdaExecutionRole.Arn
+      Role: !Sub "arn:aws:iam::${AWS::AccountId}:role/LambdaExecutionRole"
       Code:
         S3Bucket: !Ref PipelineBucket
         S3Key: 'index.js.zip'
       Runtime: 'nodejs14.x'
       Timeout: 30
-
-  # IAM Role for Lambda Execution
-  LambdaExecutionRole:
-    Type: 'AWS::IAM::Role'
-    Properties:
-      RoleName: 'LambdaExecutionRole'
-      AssumeRolePolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-          - Effect: 'Allow'
-            Principal:
-              Service: 'lambda.amazonaws.com'
-            Action: 'sts:AssumeRole'
-      Policies:
-        - PolicyName: 'LambdaExecutionPolicy'
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: 'Allow'
-                Action:
-                  - 'logs:CreateLogGroup'
-                  - 'logs:CreateLogStream'
-                  - 'logs:PutLogEvents'
-                Resource: '*'
 
   # API Gateway
   IrisApiGateway:
